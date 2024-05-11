@@ -1,0 +1,285 @@
+---
+title: "SDM2-Project"
+author: "Group 10 - Satya Anudeep Kotaru, Bhavya Teja Inturi, Vineet Sreeram"
+date: "2024-05-11"
+output: pdf_document
+---
+
+## Importing packages
+
+```{r, message = FALSE, warnings = FALSE}
+library(tidyverse)
+library(data.table)
+library(lubridate)
+library(plotly)
+library(dplyr)
+library(stringr)
+library(naniar)
+library(VIM)
+library(FactoMineR)
+library(missMDA)
+library(ggplot2)
+# library(ggfortify)
+# library(Amelia)
+library(lubridate)
+library(forecast)
+```
+
+# Importing the Data
+
+```{r}
+dt <- fread("household_power_consumption.txt", na.strings = "?")
+head(dt)
+```
+
+```{r}
+sum(is.na(dt))
+```
+
+```{r}
+dt <- na.omit(dt)
+```
+
+
+### Converting time and date to Time series object
+```{r}
+dt$datetime <- paste(dt$Date,dt$Time)
+dt$datetime <-as.POSIXct(dt$datetime, format="%d/%m/%Y %H:%M:%S")
+attr(dt$datetime, "tzone") <- "Europe/Paris"
+dt$year <- year(dt$datetime)
+dt$week <- week(dt$datetime)
+dt$day <- day(dt$datetime)
+dt$month <- month(dt$datetime)
+dt$minute <- minute(dt$datetime)
+```
+
+
+
+## time-series 
+## time-series plots for sub_metering3
+filtered the data for the second week of each month and with the frequency of 52.
+
+```{r}
+dt$hour <- hour(dt$datetime)
+houseweekly <- filter(dt, week == 2 & hour == 20 & minute == 1)
+tsSM3_weekly <- ts(houseweekly$Sub_metering_3, frequency=52, start=c(2007,1))
+ggplot2::autoplot(tsSM3_weekly, ts.colour = 'red', xlab = "Time", ylab = "Watt Hours", main = "Sub-meter 3")
+```
+
+## time-series plots for sub_metering1
+```{r}
+tsSM3_weekly <- ts(houseweekly$Sub_metering_1, frequency=52, start=c(2007,1))
+ggplot2::autoplot(tsSM3_weekly, ts.colour = 'red', xlab = "Time", ylab = "Watt Hours", main = "Sub-meter 1")
+```
+
+## time-series plots for sub_metering2
+```{r}
+tsSM3_weekly <- ts(houseweekly$Sub_metering_2, frequency=52, start=c(2007,1))
+ggplot2::autoplot(tsSM3_weekly,  ts.geom = 'bar', fill = 'blue', xlab = "Time", ylab = "Watt Hours", main = "Sub-meter 2")
+```
+
+
+## time-series plots for sub_metering2 with frequency 20
+```{r}
+tsSM3_weekly <- ts(houseweekly$Sub_metering_2, frequency=40, start=c(2007,1))
+ggplot2::autoplot(tsSM3_weekly,  ts.geom = 'bar', fill = 'blue', xlab = "Time", ylab = "Watt Hours", main = "Sub-meter 2")
+```
+
+
+# Forecasting a time-series
+## linear regression
+Apply time series linear regression
+```{r}
+house070809weekly <- filter(dt, year==2008, hour == 20 & minute == 1)
+tsSM3_070809weekly <- ts(house070809weekly$Sub_metering_3, frequency=52, start=c(2008,3))
+tsSM2_070809weekly <- ts(house070809weekly$Sub_metering_2, frequency=52, start=c(2008,3))
+tsSM1_070809weekly <- ts(house070809weekly$Sub_metering_1, frequency=52, start=c(2008,3))
+
+fit3 <- tslm(tsSM3_070809weekly ~ trend + season)
+fit2 <- tslm(tsSM2_070809weekly ~ trend + season)
+fit1 <- tslm(tsSM1_070809weekly ~ trend + season)
+summary(fit3)
+```
+
+
+## Plot the forecast
+```{r}
+forecastfitSM3c <- forecast(fit3, h=20, level=c(80,90))
+forecastfitSM2c <- forecast(fit2, h=20, level=c(80,90))
+forecastfitSM1c <- forecast(fit1, h=20, level=c(80,90))
+```
+
+```{r}
+plot(forecastfitSM3c, ylim = c(0, 20), ylab= "Watt-Hours", xlab="Time")
+```
+
+```{r}
+plot(forecastfitSM2c, ylim = c(0, 20), ylab= "Watt-Hours", xlab="Time")
+```
+
+```{r}
+plot(forecastfitSM1c, ylim = c(0, 20), ylab= "Watt-Hours", xlab="Time")
+```
+
+# Seasonal Time Series Decomposition
+## sub_metering3
+```{r}
+components070809SM3weekly <- decompose(tsSM3_070809weekly)
+plot(components070809SM3weekly)
+```
+
+```{r}
+summary(components070809SM3weekly)
+```
+
+## sub_metering2
+```{r}
+components070809SM2weekly <- decompose(tsSM2_070809weekly)
+plot(components070809SM2weekly)
+```
+
+## sub_metering1
+```{r}
+components070809SM1weekly <- decompose(tsSM1_070809weekly)
+plot(components070809SM1weekly)
+```
+
+# Applying the exponential prediction
+## decomposition
+```{r}
+tsSM3_070809Adjusted <- tsSM3_070809weekly - components070809SM3weekly$seasonal
+tsSM2_070809Adjusted <- tsSM2_070809weekly - components070809SM2weekly$seasonal
+tsSM1_070809Adjusted <- tsSM1_070809weekly - components070809SM1weekly$seasonal
+autoplot(tsSM3_070809Adjusted)
+```
+
+## Check to see the decomposition worked
+```{r}
+plot(decompose(tsSM3_070809Adjusted))
+```
+
+## Fitting the Simple Exponential Smoothing
+```{r}
+tsSM3_HW070809 <- HoltWinters(tsSM3_070809Adjusted, beta=FALSE, gamma=FALSE)
+tsSM2_HW070809 <- HoltWinters(tsSM2_070809Adjusted, beta=FALSE, gamma=FALSE)
+tsSM1_HW070809 <- HoltWinters(tsSM1_070809Adjusted, beta=FALSE, gamma=FALSE)
+```
+
+
+## Plot the exponentially smooth 
+### Sub_metering3
+```{r}
+plot(tsSM3_HW070809, ylim = c(0, 25))
+```
+
+### Sub_metering2
+```{r}
+plot(tsSM2_HW070809, ylim = c(0, 25))
+```
+
+### Sub_metering3
+```{r}
+plot(tsSM1_HW070809, ylim = c(0, 25))
+```
+
+
+## Forecast
+```{r}
+tsSM3_HW070809for <- forecast(tsSM3_HW070809, h=25)
+tsSM2_HW070809for <- forecast(tsSM2_HW070809, h=25)
+tsSM1_HW070809for <- forecast(tsSM1_HW070809, h=25)
+```
+
+### Plot the prediction
+#### Sub_metering3
+```{r}
+plot(tsSM3_HW070809for, ylim = c(0, 20), ylab= "Watt-Hours", xlab="Time - Sub-meter 3")
+```
+
+### Plot the prediction
+#### Sub_metering2
+```{r}
+plot(tsSM2_HW070809for, ylim = c(0, 20), ylab= "Watt-Hours", xlab="Time - Sub-meter 2")
+```
+
+### Plot the prediction
+#### Sub_metering1
+```{r}
+plot(tsSM1_HW070809for, ylim = c(0, 20), ylab= "Watt-Hours", xlab="Time - Sub-meter 1")
+```
+
+```{r}
+tsSM3_HW070809forC <- forecast(tsSM3_HW070809, h=25, level=c(10,25))
+plot(tsSM3_HW070809forC, ylim = c(0, 20), ylab= "Watt-Hours", xlab="Time - Sub-meter 3", start(2010))
+```
+
+
+#ARIMA
+
+```{r}
+dt$Date1 <- as.Date(dt$Date, format = "%d/%m/%Y")
+head(dt)
+```
+
+```{r}
+# Assuming your dataset is named 'data'
+# Convert 'Date' and 'Time' columns to datetime format
+new_dt <- dt %>%
+  mutate(DateTime = as.POSIXct(paste(Date, Time), format = "%d/%m/%Y %H:%M:%S")) %>%
+  select(-c(Date, Time))  # Remove original 'Date' and 'Time' columns
+
+# Aggregate data to hourly frequency by taking the mean
+hourly_data <- new_dt %>%
+  group_by(DateHour = format(DateTime, "%Y-%m-%d %H")) %>%
+  summarise(
+    Global_active_power = mean(Global_active_power, na.rm = TRUE)
+  )
+hourly_data <- na.omit(hourly_data)
+```
+
+
+```{r}
+hourly_data$Date_Hour <-as.POSIXct(hourly_data$DateHour, format="%Y-%m-%d %H")
+hourly_data <- subset(hourly_data, select = -DateHour)
+hourly_data <- hourly_data[, c("Date_Hour", "Global_active_power")]
+head(hourly_data)
+```
+
+
+```{r}
+plot(hourly_data$Date_Hour, hourly_data$Global_active_power, type = "l", xlab = "Date", ylab = "Global Active Power")
+```
+
+
+```{r}
+train_end_new <- floor(0.8 * nrow(hourly_data))
+train_new <- hourly_data[1:train_end_new, ]
+test_new <- hourly_data[(train_end_new + 1):nrow(hourly_data), ]
+arima_model_new <- auto.arima(train_new$Global_active_power)
+summary(arima_model_new)
+```
+
+
+```{r}
+forecast_values_new <- forecast(arima_model_new, h = nrow(test_new))
+accuracy(forecast_values_new, test_new$Global_active_power)
+```
+
+
+```{r}
+plot(forecast_values_new, main = "ARIMA Forecast", xlab = "Date", ylab = "Global Active Power")
+
+# Add original data for comparison
+lines(test_new$Date_Hour, test_new$Global_active_power, col = "blue")
+```
+
+# summary
+We studied the Household Electric Power Consumption dataset for the time series analysis.
+The focus of this study was the sub_metering matters.
+The sub_metering category is as follows;
+Sub_metering_1 (corresponds to the kitchen, containing mainly a dishwasher, an oven, and a microwave)
+Sub_metering_2 (mainly washing-machine, a tumble-drier)
+Sub_metering_3 ( water-heater and an air-conditioner)
+As it shows, we can check the power consumption of different areas of the houses precisely.
+
+
